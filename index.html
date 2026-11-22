@@ -156,6 +156,19 @@ body.tilt .sky{transform:translateY(0)}
 .sw div{width:78px}.sw i{display:block;width:52px;height:52px;margin:0 auto 6px;border-radius:50%;border:1px solid rgba(255,255,255,.6);box-shadow:0 0 14px rgba(150,190,255,.4)}
 .sw span{display:block;font-size:.72em;font-style:italic;line-height:1.2}
 .map{width:100%;height:min(34vh,260px);border:1px solid rgba(210,225,255,.6);border-radius:10px;margin-top:12px;box-shadow:0 0 26px rgba(150,190,255,.4)}
+
+  /* The credits image remains in the lower-left across every scene. */
+  .credits-watermark{
+    position:fixed;z-index:100;
+    left:calc(12px + env(safe-area-inset-left,0px));
+    bottom:calc(12px + env(safe-area-inset-bottom,0px));
+    display:block;width:clamp(90px,15vw,165px);max-height:64px;
+    height:auto;object-fit:contain;object-position:left bottom;
+    opacity:.78;pointer-events:none;user-select:none;
+    filter:drop-shadow(0 2px 8px rgba(1,2,35,.4));
+  }
+  .credits-watermark[hidden]{display:none}
+  @media(max-width:480px){.credits-watermark{width:clamp(82px,22vw,115px);max-height:48px}}
 </style>
 </head>
 <body>
@@ -215,6 +228,9 @@ body.tilt .sky{transform:translateY(0)}
 <button class="sk-back" id="skBack" aria-label="Back to the river"></button>
 
 <h2 class="sr">You’re invited!</h2>
+
+<!-- Add credits.png alongside this HTML file to display the watermark. -->
+<img class="credits-watermark" src="credits.png" alt="Design credits" onerror="this.hidden=true">
 
 <script>
 (function(){
@@ -735,6 +751,7 @@ body.tilt .sky{transform:translateY(0)}
   function ease(u){return u<.5?4*u*u*u:1-Math.pow(-2*u+2,3)/2}
   function bez(a,c,b,e){var i=1-e;return i*i*a+2*i*e*c+e*e*b}
   var W,H,dpr,state='idle',raf=0,T0=0,tOut=0,cur=null,origin=null,lastT=0,tForm=0,crispA=0,backOn=false;
+  var pendingSky=null,transitionId=0;  // hold one rapid next selection until the exit finishes
   var stars=[],neb=null,shoot=[],nextS=2,P=[],crisp=null;
 
   function sprite(cross,glow,arm){
@@ -928,27 +945,49 @@ body.tilt .sky{transform:translateY(0)}
     raf=requestAnimationFrame(frame);
   }
 
-  window.openSky=function(p,b){
-    if(state!=='idle'||!p.names)return;
+  function beginSky(p,b,onStart){
+    if(!b.isConnected)return false;
     state='in';cur=p;backOn=false;
-    var r=b.querySelector('.pp-clip').getBoundingClientRect();origin={x:r.left,y:r.top,w:r.width,h:r.height};
+    var id=++transitionId;
+    var r=b.querySelector('.pp-clip').getBoundingClientRect();
+    origin={x:r.left,y:r.top,w:r.width,h:r.height};
     b.classList.add('lift');
     Array.prototype.forEach.call(document.querySelectorAll('.pp'),function(e){if(e!==b)e.classList.add('sink')});
     var go=function(){
-      if(state!=='in')return;
+      // Font loading is asynchronous; ignore a stale completion after Back.
+      if(state!=='in'||id!==transitionId)return;
       sizeCanvases();buildText();
       sky.classList.add('live');fx.classList.add('live');
       T0=performance.now()/1000-(reduce?99:0);lastT=T0;
       raf=requestAnimationFrame(frame);
-      setTimeout(function(){document.body.classList.add('tilt')},reduce?0:350);   /* the camera tilts up to the sky */
+      // The content timer must begin when the animation REALLY begins.
+      if(typeof onStart==='function')onStart();
+      setTimeout(function(){
+        if(state==='in'&&id===transitionId)document.body.classList.add('tilt');
+      },reduce?0:350);   /* the camera tilts up to the sky */
     };
     Promise.all([document.fonts.load('100px "Mr Dafoe"'),document.fonts.load('italic 400 24px "Cormorant Garamond"')]).then(go,go);
+    return true;
+  }
+
+  window.openSky=function(p,b,onStart){
+    if(!p||!Array.isArray(p.names)||!b)return false;
+    if(state==='out'){
+      // Don't drop a quick RSVP/Dress Code/Maps click while Candles is leaving.
+      // Remember the latest requested destination and play its full animation next.
+      pendingSky={p:p,b:b,onStart:onStart};
+      return true;
+    }
+    if(state!=='idle')return false;
+    return beginSky(p,b,onStart);
   };
+  window.cancelSkyPending=function(){pendingSky=null};
 
   function leave(){
     if(state!=='in'&&state!=='shown')return;
     var now=performance.now()/1000;
     state='out';tOut=now;back.classList.remove('on');
+    var exitId=++transitionId;
     P.forEach(function(p){                            /* the stars pour back down into the river */
       p.qx=p.px;p.qy=p.py;p.qa=p.pa;
       p.otx=p.qx+rnd(-90,90);p.oty=H*.68+rnd(0,H*.28);
@@ -957,8 +996,16 @@ body.tilt .sky{transform:translateY(0)}
     document.body.classList.remove('tilt');
     setTimeout(function(){Array.prototype.forEach.call(document.querySelectorAll('.pp'),function(e){e.classList.remove('sink','lift')})},reduce?0:1500);
     setTimeout(function(){
+      if(state!=='out'||exitId!==transitionId)return;
       state='idle';cancelAnimationFrame(raf);P=[];
       sky.classList.remove('live');fx.classList.remove('live');fctx.clearRect(0,0,W,H);
+      var next=pendingSky;pendingSky=null;
+      if(next){
+        // Start on the next frame, after the old scene has fully reset.
+        requestAnimationFrame(function(){
+          if(state==='idle')beginSky(next.p,next.b,next.onStart);
+        });
+      }
     },reduce?50:3800);
   }
   back.addEventListener('click',leave);
@@ -1115,15 +1162,29 @@ body.tilt .sky{transform:translateY(0)}
   }
   addEventListener('resize',function(){if(dAlive&&dc)layoutDance()});
 
-  var timer=0,busy=false;
-  function hide(){clearTimeout(timer);info.classList.remove('on');busy=false;stopDance()}
+  var timer=0,busy=false,selectionId=0;
+  function hide(){
+    ++selectionId;clearTimeout(timer);
+    if(window.cancelSkyPending)window.cancelSkyPending();
+    info.classList.remove('on');busy=false;stopDance();
+  }
   tri.addEventListener('click',function(e){
-    var b=e.target.closest('.st');if(!b||!b.classList.contains('lit')||busy||!window.openSky)return;
-    var c=content[b.dataset.k];busy=true;
-    info.innerHTML=c.html();
-    info.classList.toggle('dr',b.dataset.k==='dress');
-    window.openSky({title:c.title,names:[],plain:true},b);
-    timer=setTimeout(function(){info.classList.add('on');if(b.dataset.k==='dress')startDance()},4300);
+    var b=e.target.closest('.st');
+    if(!b||!b.classList.contains('lit')||busy||!window.openSky)return;
+    var key=b.dataset.k,c=content[key],id=++selectionId;
+    var accepted=window.openSky({title:c.title,names:[],plain:true},b,function(){
+      if(selectionId!==id)return; // Back/cancellation invalidated this request.
+      info.classList.remove('on');
+      info.innerHTML=c.html();
+      info.classList.toggle('dr',key==='dress');
+      clearTimeout(timer);
+      timer=setTimeout(function(){
+        if(selectionId!==id)return;
+        info.classList.add('on');
+        if(key==='dress')startDance();
+      },reduce?0:4300);
+    });
+    if(accepted)busy=true;
   });
   document.getElementById('skBack').addEventListener('click',hide);
   addEventListener('keydown',function(e){if(e.key==='Escape')hide()});
