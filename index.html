@@ -845,23 +845,41 @@ body.tilt .sky{transform:translateY(0)}
   function buildText(){
     var nfam='"Cormorant Garamond",Georgia,serif',tfam=cur.plain?nfam:'"Mr Dafoe","Great Vibes",cursive',tw=cur.plain?'500 ':'';
     var g=document.createElement('canvas').getContext('2d');
-    var names=cur.names,n=names.length,rows=Math.ceil(n/2),num=SHOW_NUMBERS,items=[];
+    var names=cur.names,n=names.length;
+    // On portrait phones, use one spacious column instead of squeezing
+    // 18 long names into two tiny columns. Keep the same star-written lettering.
+    var phoneList=W<640 && H>W*1.12 && n>0;
+    var rows=phoneList?n:Math.ceil(n/2),num=SHOW_NUMBERS,items=[];
     g.font=tw+'100px '+tfam;var tw100=g.measureText(cur.title).width;
     var tfs=Math.min(100*Math.min(W*(W<640?.8:.86),860)/tw100,H*(W<640?.12:.16)*(cur.plain?.6:1));
-    var topPad=W<640?62:Math.max(H*.05,24),titleCy=topPad+tfs*.62;
+    var topPad=phoneList?Math.max(43,Math.min(62,H*.075)):(W<640?62:Math.max(H*.05,24)),titleCy=topPad+tfs*.62;
     items.push({txt:cur.title,font:tw+tfs+'px '+tfam,fs:tfs,cx:W/2,cy:titleCy,w:tw100*tfs/100,rot:cur.plain?0:-.045,th:.025,title:true,order:0});
-    var namesTop=titleCy+tfs*.8+H*.025,bottom=H-Math.max(H*.06,28),rowH=(bottom-namesTop)/rows;
+    var namesTop=titleCy+tfs*(phoneList?.7:.8)+H*(phoneList?.014:.025);
+    var bottom=H-Math.max(H*(phoneList?.052:.06),phoneList?24:28),rowH=(bottom-namesTop)/rows;
     g.font='italic 400 100px '+nfam;
     var w0=0,w1=0;names.forEach(function(s,i){var w=g.measureText(s).width;if(i<rows)w0=Math.max(w0,w);else w1=Math.max(w1,w)});
     var numEm=num?g.measureText(n+'.').width/100:0,gapEm=num?.45:0,m=Math.max(W*.035,14),gapC=W<640?18:Math.max(W*.05,40);
-    var emTot=2*(numEm+gapEm)+(w0+w1)/100;
-    var nfs=Math.min((W-2*m-gapC)/emTot,rowH*.56,W<640?30:40);
-    if(W>=640)gapC=Math.max(gapC,nfs*1.6);
-    var colW0=(numEm+gapEm)*nfs+w0*nfs/100,colW1=(numEm+gapEm)*nfs+w1*nfs/100,left0=(W-(colW0+gapC+colW1))/2,left1=left0+colW0+gapC;
-    var rowH2=Math.min(rowH,nfs*(W<640?3.1:2.2)),startY=namesTop+((bottom-namesTop)-rowH2*rows)/2;
+    var nfs,colW0,colW1,left0,left1,rowH2,startY;
+    if(phoneList){
+      // Readable single column: use available height, plus measure the longest
+      // actual name so nothing extends beyond the phone's edges.
+      var blockEm=numEm+gapEm+w0/100;
+      nfs=Math.max(1,Math.min((W-2*Math.max(18,W*.045))/blockEm,rowH*.76,27));
+      colW0=blockEm*nfs;left0=(W-colW0)/2;
+      rowH2=Math.min(rowH,nfs*1.65);
+      startY=namesTop+((bottom-namesTop)-rowH2*rows)/2;
+    }else{
+      var emTot=2*(numEm+gapEm)+(w0+w1)/100;
+      nfs=Math.min((W-2*m-gapC)/emTot,rowH*.56,W<640?30:40);
+      if(W>=640)gapC=Math.max(gapC,nfs*1.6);
+      colW0=(numEm+gapEm)*nfs+w0*nfs/100;colW1=(numEm+gapEm)*nfs+w1*nfs/100;
+      left0=(W-(colW0+gapC+colW1))/2;left1=left0+colW0+gapC;
+      rowH2=Math.min(rowH,nfs*(W<640?3.1:2.2));
+      startY=namesTop+((bottom-namesTop)-rowH2*rows)/2;
+    }
     var nf='italic 400 '+nfs+'px '+nfam;g.font=nf;
     names.forEach(function(s,i){
-      var col=i<rows?0:1,r=i-col*rows,x=col?left1:left0,cy=startY+(r+.5)*rowH2;
+      var col=phoneList?0:(i<rows?0:1),r=phoneList?i:i-col*rows,x=col?left1:left0,cy=startY+(r+.5)*rowH2;
       var nx=x+(numEm+gapEm)*nfs,nw=g.measureText(s).width;
       items.push({txt:s,font:nf,fs:nfs,cx:nx+nw/2,cy:cy,w:nw,rot:0,th:.035,order:i});
       if(num){var t2=(i+1)+'.',w2=g.measureText(t2).width;
@@ -897,7 +915,10 @@ body.tilt .sky{transform:translateY(0)}
         tg.setTransform(1,0,0,1,0,0);tg.globalCompositeOperation='source-in';tg.fillStyle=it.color;tg.fillRect(0,0,tc.width,tc.height);
         cg.save();cg.shadowColor='rgba(120,170,255,.9)';cg.shadowBlur=10;cg.globalAlpha=.8;cg.drawImage(tc,it.cx-it.cw/2,it.cy-it.ch/2);cg.restore();return}
       cg.save();cg.translate(it.cx,it.cy);cg.rotate(it.rot);cg.font=it.font;cg.textAlign='center';cg.textBaseline='middle';
-      cg.shadowColor='rgba(120,170,255,.95)';cg.shadowBlur=it.fs*.4;cg.fillStyle=it.dim?'#a9c0ff':'#eef3ff';cg.fillText(it.txt,0,0);cg.restore()});
+      cg.shadowColor='rgba(120,170,255,.95)';cg.shadowBlur=phoneList&&!it.title?it.fs*.22:it.fs*.4;
+      cg.fillStyle=it.dim?'#a9c0ff':'#eef3ff';cg.fillText(it.txt,0,0);
+      if(phoneList&&!it.title){cg.lineWidth=.4;cg.strokeStyle=cg.fillStyle;cg.strokeText(it.txt,0,0)}
+      cg.restore()});
   }
 
   function frame(ms){
@@ -939,7 +960,7 @@ body.tilt .sky{transform:translateY(0)}
       fctx.globalAlpha=.25+.75*f;fctx.drawImage(S2,p.px-s,p.py-s,s*2,s*2)});
     var ca;
     if(state==='out')ca=crispA*Math.max(0,1-(t-tOut)*1.5);
-    else{ca=Math.min(1,Math.max(0,(tt-(tForm-.6))/2))*.5;crispA=ca}
+    else{ca=Math.min(1,Math.max(0,(tt-(tForm-.6))/2))*(W<640&&cur.names.length?.88:.5);crispA=ca}
     if(ca>.01){fctx.globalAlpha=ca;fctx.drawImage(crisp,0,0,W,H)}
     fctx.globalAlpha=1;fctx.globalCompositeOperation='source-over';
     raf=requestAnimationFrame(frame);
