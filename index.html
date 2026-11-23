@@ -170,6 +170,10 @@ body.tilt .sky{transform:translateY(0)}
   .credits-watermark[hidden]{display:none}
   @media(max-width:480px){.credits-watermark{width:clamp(82px,22vw,115px);max-height:48px}}
 
+/* ---------- FIREWORKS: "See you on December 5th!" ---------- */
+#fw,#fwa{position:absolute;inset:0;width:100%;height:100%;z-index:35;pointer-events:none}
+.stage.fwOn .tri.on{opacity:.28}   /* the three stars hush while the sky writes the date */
+
 /* ---------- SOUND (minimal) ---------- */
 .snd-wrap{position:fixed;left:calc(16px + env(safe-area-inset-left,0px));top:calc(16px + env(safe-area-inset-top,0px));z-index:9999;display:flex;flex-direction:row-reverse;align-items:center;gap:10px;pointer-events:none}
 .snd-hint{font:500 11px/1 "Cormorant Garamond",Georgia,serif;letter-spacing:.24em;text-transform:uppercase;color:#eaf3ff;white-space:nowrap;text-shadow:0 0 10px rgba(130,170,255,.9);
@@ -1257,6 +1261,255 @@ body.tilt .sky{transform:translateY(0)}
 })();
 </script>
 
+<!-- ---------- FIREWORKS: two shells burst over the river and write the date ---------- -->
+<script>
+(function(){
+  /* ====== EDIT THESE ====== */
+  var CFG={
+    lines:['See you on','December 5th!'],
+    first:14600,   /* ms after the envelopes start floating in (the bird finishes first) */
+    repeat:60000,  /* replay the date show every 60s while someone stays on the river; 0 = play once */
+    ambient:[4000,8000]  /* between shows, a single shell every 4-8 seconds; set to null for none */
+  };
+
+  var stage=document.querySelector('.stage'),body=document.body;
+  var reduce=false;try{reduce=matchMedia('(prefers-reduced-motion: reduce)').matches}catch(e){}
+  var cv=document.createElement('canvas');cv.id='fw';cv.setAttribute('aria-hidden','true');stage.appendChild(cv);
+  var g=cv.getContext('2d');
+  function rnd(a,b){return a+Math.random()*(b-a)}
+
+  /* glowing dot sprites: ice-white, soft blue, champagne gold (the dress code's own colour) */
+  function sprite(glow,arm,cross){
+    var c=document.createElement('canvas');c.width=c.height=64;var x=c.getContext('2d');
+    var r=x.createRadialGradient(32,32,0,32,32,32);
+    r.addColorStop(0,'rgba(255,255,255,1)');r.addColorStop(.3,'rgba(255,255,255,.92)');r.addColorStop(.55,'rgba('+glow+',.34)');r.addColorStop(1,'rgba('+glow+',0)');
+    x.fillStyle=r;x.fillRect(0,0,64,64);
+    if(cross){
+      [[0,0,64,0,0,30.5,64,3],[0,0,0,64,30.5,0,3,64]].forEach(function(a){
+        var l=x.createLinearGradient(a[0],a[1],a[2],a[3]);
+        l.addColorStop(0,'rgba('+arm+',0)');l.addColorStop(.5,'rgba('+arm+',.95)');l.addColorStop(1,'rgba('+arm+',0)');
+        x.fillStyle=l;x.fillRect(a[4],a[5],a[6],a[7])});
+    }
+    return c}
+  var S0=sprite('170,195,255','',0),S1=sprite('170,195,255','255,255,255',1),S2=sprite('110,160,255','190,215,255',0),S3=sprite('255,214,140','255,240,200',1);
+
+  /* ---- the timeline (seconds). The music reads these same numbers, so sight and sound can't drift apart ---- */
+  var A=.55,          /* how long a shell's sparks fly outward before they start to write */
+      SW=.8,          /* the writing sweeps left to right over this long */
+      LAT=.06,        /* small head start for audio output latency */
+      LAUNCH=[0,.9],  /* rocket 1 writes "See you on", rocket 2 writes "December 5th!" */
+      RISE=[1.15,1.1],
+      B=[LAUNCH[0]+RISE[0],LAUNCH[1]+RISE[1]],   /* burst times */
+      HOLD=4.3,FALL=1.9,
+      LAD=[74,78,81,86,90,93,95,98];             /* D-major pentatonic ladder: one bell per word */
+  var run=null,busy=false,armed=false,timer=0,aT=0,ambOn=false,quietUntil=0;
+
+  /* ---- turn the lettering into stipple dots (same look as the "You're invited!" opening) ---- */
+  function stip(d,w,h,step){
+    var o=step*2.4,dg=o*.7,pts=[];
+    function a(x,y){x=x|0;y=y|0;return(x<0||y<0||x>=w||y>=h)?0:d[(y*w+x)*4+3]>110?1:0}
+    for(var y=step/2;y<h;y+=step)for(var x=step/2;x<w;x+=step){
+      if(!a(x,y))continue;
+      var n=a(x+o,y)+a(x-o,y)+a(x,y+o)+a(x,y-o)+a(x+dg,y+dg)+a(x-dg,y-dg)+a(x+dg,y-dg)+a(x-dg,y+dg);
+      pts.push([x+rnd(-.7,.7),y+rnd(-.7,.7),.55+.6*n/8])}
+    return pts}
+  function sample(W,H){
+    var fam='"Mr Dafoe","Kaushan Script","Great Vibes",cursive',L=CFG.lines;
+    var oc=document.createElement('canvas'),c=oc.getContext('2d'),widest=0;
+    c.font='100px '+fam;
+    L.forEach(function(s){widest=Math.max(widest,c.measureText(s).width)});
+    var fs=Math.min(100*Math.min(W*.74,700)/widest,H*.115,150),lh=fs*1.02;
+    oc.width=Math.ceil(W);oc.height=Math.ceil(lh*L.length+fs*1.2);
+    var cx=oc.width/2,cy=oc.height/2,sh=Math.min(fs*.25,W*.04),words=[],raw=[];
+    L.forEach(function(s,i){                       /* each line is sampled alone so each rocket owns one line */
+      c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,oc.width,oc.height);
+      c.font=fs+'px '+fam;c.textAlign='center';c.textBaseline='middle';c.fillStyle='#fff';c.strokeStyle='#fff';c.lineWidth=fs*.025;c.lineJoin='round';
+      var x=(i%2?1:-1)*sh,y=(i-(L.length-1)/2)*lh,tw=c.measureText(s).width,ws=s.split(' ');
+      c.translate(cx,cy);c.rotate(-.05);c.fillText(s,x,y);c.strokeText(s,x,y);
+      ws.forEach(function(wd,k){
+        var pre=c.measureText(ws.slice(0,k).join(' ')+(k?' ':'')).width,ww=c.measureText(wd).width;
+        words.push({ln:i,cx:cx+x-tw/2+pre+ww/2})});
+      raw.push(c.getImageData(0,0,oc.width,oc.height).data)});
+    var step=Math.max(3,Math.round(fs/30)),out;
+    for(;;step++){
+      out=raw.map(function(d){return stip(d,oc.width,oc.height,step)});
+      if(out.reduce(function(n,a){return n+a.length},0)<=2600)break}
+    var cyT=H*.365,oy=cyT-oc.height/2;
+    var lines=out.map(function(pts){
+      var x0=1e9,x1=-1e9;pts.forEach(function(q){x0=Math.min(x0,q[0]);x1=Math.max(x1,q[0]);q[1]+=oy});
+      return{pts:pts,x0:x0,x1:x1}});
+    words.forEach(function(w){var l=lines[w.ln];w.f=Math.max(0,Math.min(1,(w.cx-l.x0)/Math.max(1,l.x1-l.x0)))});
+    return{lines:lines,words:words,step:step,fs:fs,cy:cyT}}
+
+  /* ---- can we play right now? (never over an open envelope, the sky screens, or the intro) ---- */
+  function ok(){var d=document;return !run&&!busy&&!d.hidden&&!body.classList.contains('tilt')&&
+    !d.getElementById('sky').classList.contains('live')&&!d.getElementById('pview').classList.contains('on')&&
+    !d.getElementById('card')&&!!d.querySelector('#riverPapers .pp.in')}
+  function later(ms){clearTimeout(timer);timer=setTimeout(function(){ok()?play():later(4000)},ms)}
+  function play(){
+    if(run||busy)return;busy=true;
+    var go=function(){busy=false;start()};
+    if(document.fonts&&document.fonts.load)document.fonts.load('100px "Mr Dafoe"',CFG.lines.join(' ')).then(go,go);else go()}
+
+  function start(){
+    var W=stage.clientWidth,H=stage.clientHeight;if(!W||!H){later(4000);return}
+    var dpr=Math.min(devicePixelRatio||1,2);
+    cv.width=W*dpr;cv.height=H*dpr;g.setTransform(dpr,0,0,dpr,0,0);
+    var T=sample(W,H),SPD=Math.min(W,H)*.78;
+    var BX=[W*.34,W*.66],BY=[H*.215,H*.185],X0=[W*.3,W*.7],Y0=H*.535;   /* shells rise from the bridge deck */
+    var P=[],sparks=[],fl=[0,0],fin=0,raf=0,hAt=0,gx0=1e9,gx1=-1e9;
+
+    T.lines.forEach(function(L,i){
+      gx0=Math.min(gx0,L.x0);gx1=Math.max(gx1,L.x1);
+      L.pts.forEach(function(q){
+        var r=Math.random(),ring=Math.random()<.35,fr=(q[0]-L.x0)/Math.max(1,L.x1-L.x0);
+        P.push({ln:i,tx:q[0],ty:q[1],r:T.step*.36*q[2],spr:r<.5?S1:r<.78?S3:S0,
+          dl:fr*SW+rnd(0,.14),D:rnd(.95,1.3),sw:Math.random()<.5?-1:1,ph:rnd(0,6.28),s:rnd(1.2,3),
+          sp:ring?SPD*rnd(.88,1):SPD*(.12+.7*Math.pow(Math.random(),.7)),fd:rnd(0,.9),
+          born:0,fall:0,fz:0,x:0,y:0,lx:0,ly:0,vx:0,vy:0,fx:0,fy:0})})});
+    var rockets=[0,1].map(function(i){return{x0:X0[i],y0:Y0,x1:BX[i],y1:BY[i],t0:LAUNCH[i],d:RISE[i],lit:0}});
+
+    /* the score's cue list, built from the same timeline the pixels use */
+    var ev=[],pans=[-.5,.5],lastNote=0;
+    [0,1].forEach(function(i){
+      ev.push({k:'launch',t:LAUNCH[i],d:RISE[i],pan:pans[i]},{k:'burst',t:B[i],pan:pans[i]},
+              {k:'run',t:B[i]+A+.05,n:10,gap:(SW+1)/10});
+    });
+    T.words.forEach(function(w,k){
+      var tt=B[w.ln]+A+w.f*SW+1.12;lastNote=Math.max(lastNote,tt);        /* a bell as each word settles */
+      ev.push({k:'note',t:tt,m:LAD[Math.min(k+1,LAD.length-1)],pan:w.cx/W*1.2-.6})});
+    var tFin=lastNote+.18,tFall=tFin+HOLD,END=tFall+FALL+1.1;
+    ev.push({k:'finale',t:tFin},{k:'fall',t:tFall});
+    window.SFX&&SFX.cue('fw',{ev:reduce?[{k:'finale',t:.5}]:ev,total:reduce?7:tFall});
+
+    var T0=performance.now()+LAT*1000,last=-LAT;
+    run={stop:finish};
+    stage.classList.add('fwOn');
+    function vis(){if(document.hidden)hAt=performance.now();else if(hAt){T0+=performance.now()-hAt;hAt=0}}   /* the score pauses with the tab, so we do too */
+    function rs(){if(stage.clientWidth!==W||Math.abs(stage.clientHeight-H)>H*.2)finish()}
+    document.addEventListener('visibilitychange',vis);addEventListener('resize',rs);
+    function finish(){
+      cancelAnimationFrame(raf);document.removeEventListener('visibilitychange',vis);removeEventListener('resize',rs);
+      g.clearRect(0,0,W,H);stage.classList.remove('fwOn');run=null;quietUntil=performance.now()+3000;
+      if(CFG.repeat)later(CFG.repeat);if(!ambOn){ambOn=true;ambLater()}}
+
+    function sparkBurst(x,y,n,spd){
+      for(var i=0;i<n&&sparks.length<700;i++){
+        var a=rnd(0,6.283),v=spd*(.25+.75*Math.sqrt(Math.random()));
+        sparks.push({x:x,y:y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,life:rnd(1.1,2),age:0,s:rnd(6,12),spr:Math.random()<.5?S3:S1,gr:70,k:1.7})}}
+
+    function frame(now){
+      raf=requestAnimationFrame(frame);
+      var t=(now-T0)/1000,dt=Math.min(.05,Math.max(0,t-last));last=t;
+      g.globalCompositeOperation='source-over';g.globalAlpha=1;g.clearRect(0,0,W,H);
+      if(t<0)return;
+      g.globalCompositeOperation='lighter';
+
+      if(reduce){                                  /* reduced motion: the words simply glow in and out */
+        var fa=Math.max(0,Math.min(1,(t-.3)/1.2,(7-t)/1.2));
+        P.forEach(function(p){g.globalAlpha=fa*(.75+.25*Math.sin(t*p.s+p.ph));var z=p.r*4.4+2.2;g.drawImage(p.spr,p.tx-z/2,p.ty-z/2,z,z)});
+        if(t>7.2)finish();return}
+
+      /* soft light behind the lettering once it has formed, so it reads against the hills */
+      var hf=Math.max(0,Math.min(1,(t-(tFin-1.2))/1.6))*Math.max(0,Math.min(1,(tFall+FALL-t)/FALL));
+      if(hf>0){var bw=gx1-gx0;g.globalAlpha=.2*hf;g.drawImage(S2,(gx0+gx1)/2-bw*.7,T.cy-T.fs*1.5,bw*1.4,T.fs*3)}
+
+      /* rockets climbing from the bridge */
+      rockets.forEach(function(r){
+        if(t<r.t0||t>r.t0+r.d)return;
+        var p=(t-r.t0)/r.d,e=1-Math.pow(1-p,2.3),x=r.x0+(r.x1-r.x0)*e+Math.sin(p*20)*3*(1-p),y=r.y0+(r.y1-r.y0)*e,i;
+        if(!r.lit){r.lit=1;for(i=0;i<14;i++)sparks.push({x:r.x0,y:r.y0,vx:rnd(-60,60),vy:rnd(-90,-10),life:rnd(.4,.8),age:0,s:rnd(5,8),spr:S3,gr:120,k:1.5})}
+        for(i=0;i<2;i++)sparks.push({x:x+rnd(-1.5,1.5),y:y,vx:rnd(-14,14),vy:rnd(14,46),life:rnd(.45,.9),age:0,s:rnd(5,9)*(1-p*.4),spr:S3,gr:50,k:1.2});
+        g.globalAlpha=.55;g.drawImage(S2,x-26,y-26,52,52);g.globalAlpha=1;g.drawImage(S1,x-10,y-10,20,20)});
+
+      /* the flash of each burst, plus a few loose sparks that fall away like a real shell */
+      [0,1].forEach(function(i){
+        var u=t-B[i];
+        if(u>=0&&!fl[i]){fl[i]=1;sparkBurst(BX[i],BY[i],70,SPD*.85)}
+        if(u>=0&&u<.5){var f=1-u/.5,z=Math.min(W,H)*.75*(1.1-.5*f);g.globalAlpha=.6*f*f;g.drawImage(S2,BX[i]-z/2,BY[i]-z/2,z,z)}});
+      if(t>=tFin&&!fin){fin=1;sparkBurst(W*.17,H*.3,60,SPD*.55);sparkBurst(W*.83,H*.28,60,SPD*.55)}
+
+      /* the dots: burst outward, then curve into the letters left to right, hold and twinkle, then drift down */
+      P.forEach(function(p){
+        var bt=B[p.ln];if(t<bt)return;
+        if(!p.born){p.born=1;var a=rnd(0,6.283);p.x=BX[p.ln];p.y=BY[p.ln];p.vx=Math.cos(a)*p.sp;p.vy=Math.sin(a)*p.sp;p.lx=p.x;p.ly=p.y}
+        var ts=bt+A+p.dl,te=ts+p.D,al=1,moving=true,x,y,u,tw=.72+.28*Math.sin(t*p.s*2+p.ph);
+        if(t<ts){
+          var kd=Math.exp(-2.6*dt);p.vx*=kd;p.vy*=kd;p.vy+=22*dt;p.x+=p.vx*dt;p.y+=p.vy*dt;x=p.x;y=p.y}
+        else if(t<te){
+          if(!p.fz){p.fz=1;p.fx=p.x;p.fy=p.y}
+          u=(t-ts)/p.D;
+          var e=u<.5?4*u*u*u:1-Math.pow(-2*u+2,3)/2,dx=p.tx-p.fx,dy=p.ty-p.fy,s=Math.sin(Math.PI*u)*.16*p.sw;
+          x=p.fx+dx*e-dy*s;y=p.fy+dy*e+dx*s;p.x=x;p.y=y}
+        else{
+          moving=false;al=tw;
+          if(t<tFall+p.fd){x=p.tx+Math.sin(t*p.s+p.ph)*.5;y=p.ty+Math.cos(t*p.s*.8+p.ph)*.5;p.x=x;p.y=y}
+          else{
+            if(!p.fall){p.fall=1;p.vx=rnd(-16,16);p.vy=rnd(4,26)}
+            p.vx*=Math.exp(-.6*dt);p.vy+=110*dt;p.x+=p.vx*dt;p.y+=p.vy*dt;x=p.x;y=p.y;
+            al=tw*(1-(t-tFall-p.fd)/FALL);if(al<=0)return}}
+        var z=(p.r*4.4+2.2)*(1+Math.max(0,1-(t-bt)/1.3)*1.2)*(moving?1:.88+.24*tw);
+        g.globalAlpha=al;g.drawImage(p.spr,x-z/2,y-z/2,z,z);
+        if(moving){var mx=x-p.lx,my=y-p.ly;
+          if(mx*mx+my*my>2){g.globalAlpha=al*.45;g.drawImage(p.spr,x-mx*2.2-z*.3,y-my*2.2-z*.3,z*.6,z*.6)}}
+        p.lx=x;p.ly=y});
+
+      sparks=sparks.filter(function(s){
+        s.age+=dt;if(s.age>s.life)return false;
+        var kd=Math.exp(-s.k*dt),f=s.age/s.life,z=s.s*(1-f*.5);
+        s.vx*=kd;s.vy*=kd;s.vy+=s.gr*dt;s.x+=s.vx*dt;s.y+=s.vy*dt;
+        g.globalAlpha=Math.min(1,(1-f)*1.4);g.drawImage(s.spr,s.x-z,s.y-z,z*2,z*2);return true});
+
+      g.globalAlpha=1;g.globalCompositeOperation='source-over';
+      if(t>END)finish()}
+    raf=requestAnimationFrame(frame);
+  }
+
+  /* ---- ambient shells: one firework at a time, every few seconds, between the date shows ---- */
+  var ac=document.createElement('canvas');ac.id='fwa';ac.setAttribute('aria-hidden','true');stage.appendChild(ac);
+  var ag=ac.getContext('2d'),aSp=[],aRk=[],aF=[],aRaf=0,aLast=0,aW=0,aH=0;
+  function aLoop(now){
+    var dt=Math.min(.05,(now-aLast)/1000);aLast=now;
+    ag.globalCompositeOperation='source-over';ag.globalAlpha=1;ag.clearRect(0,0,aW,aH);ag.globalCompositeOperation='lighter';
+    aRk=aRk.filter(function(r){
+      r.age+=dt;if(r.age<0)return true;
+      var p=Math.min(1,r.age/r.d),e=1-Math.pow(1-p,2.3),x=r.x0+(r.x1-r.x0)*e+Math.sin(p*20)*3*(1-p),y=r.y0+(r.y1-r.y0)*e,i;
+      if(r.age>=r.d){                                   /* burst */
+        aF.push({x:r.x1,y:r.y1,age:0});
+        for(i=0;i<90;i++){var a=rnd(0,6.283),ring=i%3===0,v=Math.min(aW,aH)*.6*(ring?rnd(.85,1):.15+.7*Math.pow(Math.random(),.7));
+          aSp.push({x:r.x1,y:r.y1,vx:Math.cos(a)*v,vy:Math.sin(a)*v,life:rnd(1.2,2.2),age:0,s:rnd(6,11),spr:[S1,S3,S0,S3][i%4],gr:60,k:1.9})}
+        return false}
+      for(i=0;i<2;i++)aSp.push({x:x+rnd(-1.5,1.5),y:y,vx:rnd(-14,14),vy:rnd(14,46),life:rnd(.45,.9),age:0,s:rnd(5,8),spr:S3,gr:50,k:1.2});
+      ag.globalAlpha=.55;ag.drawImage(S2,x-24,y-24,48,48);ag.globalAlpha=1;ag.drawImage(S1,x-9,y-9,18,18);return true});
+    aF=aF.filter(function(f){f.age+=dt;if(f.age>.5)return false;var q=1-f.age/.5,z=Math.min(aW,aH)*.5*(1.1-.5*q);
+      ag.globalAlpha=.45*q*q;ag.drawImage(S2,f.x-z/2,f.y-z/2,z,z);return true});
+    aSp=aSp.filter(function(s){
+      s.age+=dt;if(s.age>s.life)return false;
+      var kd=Math.exp(-s.k*dt),f=s.age/s.life,z=s.s*(1-f*.5);
+      s.vx*=kd;s.vy*=kd;s.vy+=s.gr*dt;s.x+=s.vx*dt;s.y+=s.vy*dt;
+      ag.globalAlpha=Math.min(1,(1-f)*1.4);ag.drawImage(s.spr,s.x-z,s.y-z,z*2,z*2);return true});
+    ag.globalAlpha=1;ag.globalCompositeOperation='source-over';
+    if(aRk.length||aSp.length||aF.length)aRaf=requestAnimationFrame(aLoop);else{aRaf=0;ag.clearRect(0,0,aW,aH)}}
+  function shell(){
+    var W=stage.clientWidth,H=stage.clientHeight;if(!W||!H)return;
+    var dpr=Math.min(devicePixelRatio||1,2);
+    if(ac.width!==Math.round(W*dpr)||ac.height!==Math.round(H*dpr)){ac.width=W*dpr;ac.height=H*dpr;ag.setTransform(dpr,0,0,dpr,0,0)}
+    aW=W;aH=H;
+    var x0=rnd(.12,.88)*W,x1=Math.max(.06*W,Math.min(.94*W,x0+rnd(-.08,.08)*W)),y1=rnd(.1,.32)*H,d=rnd(.95,1.25),pan=x1/W*1.6-.8;
+    aRk.push({x0:x0,y0:H*.535,x1:x1,y1:y1,d:d,age:-LAT});
+    window.SFX&&SFX.cue('fw',{ev:[{k:'launch',t:0,d:d,pan:pan},{k:'burst',t:d,pan:pan},{k:'note',t:d+.15,m:LAD[1+Math.floor(Math.random()*5)],pan:pan}],total:d+2});
+    if(!aRaf){aLast=performance.now();aRaf=requestAnimationFrame(aLoop)}}
+  function ambLater(){
+    clearTimeout(aT);var r=CFG.ambient;if(!r||reduce)return;
+    aT=setTimeout(function(){if(ok()&&performance.now()>quietUntil)shell();ambLater()},rnd(r[0],r[1]))}
+
+  /* arm it once the envelopes start floating in; the bird lights the stars first, then the sky writes the date */
+  var sp0=window.spawnPapers;
+  window.spawnPapers=function(){if(sp0)sp0();if(!armed){armed=true;later(CFG.first)}};
+  window.playFireworks=function(){if(!run&&!busy)play()};   /* handy for testing: type playFireworks() in the console */
+})();
+</script>
+
 <div class="snd-wrap" id="sndWrap"><span class="snd-hint" id="sndHint" aria-hidden="true">Tap for music</span>
 <button class="snd" id="snd" type="button" aria-label="Turn sound on" aria-pressed="false" title="Sound">
   <svg class="x" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/></svg>
@@ -1315,6 +1568,10 @@ function riser(t,L){var rg=ctx.createGain();route(rg,0,.7,.25);
   return{stop:function(t2){rg.gain.cancelScheduledValues(t2);rg.gain.setValueAtTime(rg.gain.value,t2);rg.gain.linearRampToValueAtTime(0,t2+.12)}}}
 function bloom(t,v){[74,78,81,86,88,93].forEach(function(m,i){bell(m,t+i*.06,.09*v,-.7+i*.28)});voice(F(38),t,[[1,.2*v,4.5]],0,.4,0);swell(t,1.6,2500,9000,.05*v,0,.2)}
 function cascade(t,n,gap,v,up){for(var i=0;i<n;i++)harp(pn(up?i:n-1-i,1),t+i*gap,v,R(-.7,.7))}
+function pop(t,v,pan){var s=nz(),f=ctx.createBiquadFilter(),g=ctx.createGain();f.type='highpass';f.frequency.value=R(2600,5200);
+  g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.0001,t+R(.03,.08));s.connect(f);f.connect(g);route(g,pan,.35,0);s.start(t,R(0,1.5));s.stop(t+.12)}
+function whistle(t,L,pan){var o=ctx.createOscillator(),g=ctx.createGain();o.type='sine';o.frequency.setValueAtTime(F(69),t);o.frequency.exponentialRampToValueAtTime(F(98),t+L);
+  g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(.014,t+L*.85);g.gain.exponentialRampToValueAtTime(.0001,t+L);o.connect(g);route(g,pan,.6,.25);o.start(t);o.stop(t+L+.1)}
 function drops(t,n,span,v){for(var i=0;i<n;i++)drop(t+Math.pow(Math.random(),.8)*span,pn(Math.floor(R(0,9)),1),v,R(-1,1))}
 function pad(ci,t,len,at){at=at||2.2;var c=SC[scene],f=ctx.createBiquadFilter();f.type='lowpass';f.Q.value=.7;f.frequency.setValueAtTime(c.cut*.6,t);f.frequency.linearRampToValueAtTime(c.cut,t+len*.6);
   var g=ctx.createGain(),pk=.011*c.pad;g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(pk,t+at);g.gain.setValueAtTime(pk,t+len);g.gain.linearRampToValueAtTime(0,t+len+3);
@@ -1360,6 +1617,16 @@ function cue(n,o){o=o||{};
   else if(n==='leave'){if(riserH)riserH.stop(t);riserH=null;padBus.gain.setTargetAtTime(1,t,.5);cascade(t,10,.16,.05,false);drops(t+1,10,2.6,.05);swell(t+.4,2.6,1800,400,.025,0,.4)}
   else if(n==='info'){[86,90,93].forEach(function(m,k){chime(m,t+k*.12,.06,(k-1)*.4,2.2)})}
   else if(n==='dance'){nextDance=t;danceBar=0}
+  else if(n==='fw'){(o.ev||[]).forEach(function(e){var tt=t+e.t,pan=e.pan||0,j;
+    if(e.k==='launch'){swell(tt,e.d,500,4200,.03,pan,.92);whistle(tt,e.d,pan)}
+    else if(e.k==='burst'){voice(F(38),tt,[[1,.17,1.3],[2,.05,.5]],pan,.35,0);swell(tt,1,6500,800,.065,pan,.04);
+      [78,81,86].forEach(function(m,k){bell(m,tt+k*.05,.05,pan)});for(j=0;j<14;j++)pop(tt+.1+Math.pow(Math.random(),1.5)*1.2,R(.018,.04),R(-.8,.8))}
+    else if(e.k==='run'){for(j=0;j<e.n;j++)chime(pn(j,1),tt+j*e.gap,.04+.03*j/e.n,-.8+1.6*j/(e.n-1),1.8)}
+    else if(e.k==='note'){bell(e.m,tt,.1,pan);harp(e.m-12,tt,.06,pan)}
+    else if(e.k==='finale'){bloom(tt,1.2);voice(F(38),tt,[[1,.2,2]],0,.4,0);
+      [-.7,.7].forEach(function(p,k){var u=tt+.08+k*.12;swell(u,.9,6000,900,.05,p,.04);for(j=0;j<8;j++)pop(u+.1+Math.random()*.9,R(.015,.035),p+R(-.3,.3))})}
+    else if(e.k==='fall'){cascade(tt,10,.17,.045,false);drops(tt+.8,10,2.2,.04);swell(tt+.3,2.4,1800,400,.025,0,.4)}
+  });boostUntil=t+(o.total||10)}
   else if(n==='hover'){chime(pn(Math.floor(R(0,8)),2),t,.035,o.pan||0,1.2)}
 }
 window.SFX={cue:cue};
